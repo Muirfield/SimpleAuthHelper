@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/alejandroliu/pocketmine-plugins/master/Media/helper.alt-icon.png" style="width:64px;height:64px" width="64" height="64"/>
+<img src="https://raw.githubusercontent.com/Muirfield/SimpleAuthHelper/master/media/helper.alt-icon.png" style="width:64px;height:64px" width="64" height="64"/>
 
 <!-- meta:Categories = AdminTools -->
 <!-- meta:PluginAccess = Commands, Other Plugins, Manages Permissions -->
@@ -12,7 +12,6 @@
 - OptionalPlugins: 
 - Categories: AdminTools 
 - Plugin Access: Commands, Other Plugins, Manages Permissions 
-- WebSite: https://github.com/alejandroliu/pocketmine-plugins/tree/master/SimpleAuthHelper
 
 <!-- end-include -->
 
