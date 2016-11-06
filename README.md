@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/alejandroliu/bad-plugins/master/Media/helper.alt-icon.png" style="width:64px;height:64px" width="64" height="64"/>
+<img src="https://raw.githubusercontent.com/alejandroliu/pocketmine-plugins/master/Media/helper.alt-icon.png" style="width:64px;height:64px" width="64" height="64"/>
 
 SimpleAuthHelper
 ================
@@ -10,7 +10,7 @@ SimpleAuthHelper
 * OptionalPlugins: -
 * Categories: General
 * Plugin Access: Commands
-* WebSite: [github](https://github.com/alejandroliu/bad-plugins/tree/master/SimpleAuthHelper)
+* WebSite: [github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/SimpleAuthHelper)
 
 Overview
 --------
@@ -70,18 +70,26 @@ registration.  This is configured through the `nest-egg` setting.
 	- "266:0:10"
 	max-attempts: 5
 	login-timeout: 60
+	auto-ban: false
 	...
 
 * The section `messages` can be used to configure displayed texts.
 * `nest-egg` section contains list of items that will be given to the
-player upon registration.
+  player upon registration.
 * `max-attempts` counts the number of tries to login.
 * `login-timeout` will kick the player out if not authenticated in
   that number of seconds.
+* `auto-ban`: If set to true it will automatically ban the IP of a
+  player that does too many login attempts.
 
 Changes
 -------
 
+* 1.2.3: Security improvements
+  - prevent user from chatting away their password
+  - add option so that players can also use "/login" to login.
+* 1.2.2: Auto-Ban
+  - Too many login attempts will cause the player to be banned.
 * 1.2.1: CallbackTask deprecation
   * Removed CallbackTask deprecation warnings
 * 1.2.0: max-logins

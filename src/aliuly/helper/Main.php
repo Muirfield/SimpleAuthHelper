@@ -29,6 +29,7 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		}
 		if (!is_dir($this->getDataFolder())) mkdir($this->getDataFolder());
 		$defaults = [
+			"version" => $this->getDescription()->getVersion(),
 			"messages" => [
 				"re-enter pwd" => "Please re-enter password to confirm:",
 				"passwords dont match" => "Passwords do not match.\nPlease try again!\nEnter a new password:",
@@ -43,6 +44,8 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 				"chpwd ok" => "Password changed succesfully",
 				"registration error" => "Registration error.  Try again later!",
 				"auth error" => "Authentication error.  Try again later!",
+				"chat protected" => "Do not send your password on the chat window",
+				"snob login" => "Actually, you don't really need to type /login",
 			],
 			"nest-egg" => [
 				"STONE_SWORD:0:1",
@@ -52,6 +55,9 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 			],
 			"max-attempts" => 5,
 			"login-timeout" => 60,
+			"auto-ban" => false,
+			"lamer-mode" => false,
+			"chat-protect" => false,
 		];
 		if (file_exists($this->getDataFolder()."config.yml")) {
 			unset($defaults["nest-egg"]);
@@ -84,7 +90,16 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		if ($ev->isCancelled()) return;
 		$pl = $ev->getPlayer();
 		$n = $pl->getName();
-		if ($this->auth->isPlayerAuthenticated($pl) && !isset($this->chpwd[$n])) return;
+		if ($this->auth->isPlayerAuthenticated($pl) && !isset($this->chpwd[$n])) {
+			if ($this->cfg["chat-protect"]) {
+				if ($this->authenticate($pl,$ev->getMessage())) {
+					$pl->sendMessage($this->cfg["messages"]["chat protected"]);
+					$ev->setMessage("**CENSORED**");
+					$ev->setCancelled();
+				}
+			}
+			return;
+		}
 
 		if (!$this->auth->isPlayerRegistered($pl) || isset($this->chpwd[$n])) {
 			if (!isset($this->pwds[$n])) {
@@ -150,7 +165,16 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 			}
 			return;
 		}
-		$ev->setMessage("/login ".$ev->getMessage());
+		if ($this->cfg["lamer-mode"]) {
+			$msg = $ev->getMessage();
+			if (preg_match('/^\s*\/login\s+/',$msg)) {
+				$pl->sendMessage($this->cfg["messages"]["snob login"]);
+			} else {
+				$ev->setMessage("/login $msg");
+			}
+		} else {
+			$ev->setMessage("/login ".$ev->getMessage());
+		}
 		if ($this->cfg["max-attempts"] > 0) {
 			if (isset($this->pwds[$n])) {
 				++$this->pwds[$n];
@@ -172,6 +196,14 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		$pl = $this->getServer()->getPlayer($n);
 		if ($pl && !$this->auth->isPlayerAuthenticated($pl)) {
 			if ($this->pwds[$n] >= $this->cfg["max-attempts"]) {
+				if ($this->cfg["auto-ban"]) {
+					// OK banning use for trying to hack...
+					$ip = $pl->getAddress();
+					$this->getServer()->getIPBans()->addBan($ip,"Too many login attempts",null,"SimpleAuthHelper");
+					$this->getServer()->blockAddress($ip,-1);
+					$this->getServer()->broadcastMessage("[Helper] Banned IP Address $ip");
+				}
+
 				$pl->kick($this->cfg["messages"]["too many logins"]);
 				unset($this->pwds[$n]);
 			}
@@ -195,6 +227,14 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		}
 		return true;
 	}
+	protected function authenticate($pl,$password) {
+		$provider = $this->auth->getDataProvider();
+		if (($data = $provider->getPlayer($pl)) === null) {
+			return false;
+		}
+		return hash_equals($data["hash"], $this->hash(strtolower($pl->getName()), $password));
+	}
+
 	//////////////////////////////////////////////////////////////////////
 	//
 	// Commands
@@ -218,21 +258,13 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 					$sender->sendMessage($this->cfg["messages"]["register first"]);
 					return true;
 				}
-				$provider = $this->auth->getDataProvider();
-				if (($data = $provider->getPlayer($sender)) === null) {
-					$sender->sendMessage(TextFormat::RED.
-												"Internal Registration error");
-					return true;
-				}
-				$password = implode(" ", $args);
-				if(hash_equals($data["hash"], $this->hash(strtolower($sender->getName()), $password))) {
+				if ($this->authenticate($sender,implode(" ", $args))) {
 					$this->chpwd[$sender->getName()] = $sender->getName();
 					$sender->sendMessage($this->cfg["messages"]["chpwd msg"]);
 					return true;
-				}else{
-					$sender->sendMessage($this->cfg["messages"]["chpwd error"]);
-					return false;
 				}
+				$sender->sendMessage($this->cfg["messages"]["chpwd error"]);
+				return false;
 				break;
 			case "resetpwd":
 				foreach($args as $name){
