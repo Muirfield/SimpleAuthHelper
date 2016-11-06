@@ -52,6 +52,7 @@ class EventListener implements Listener{
 	 * @priority LOWEST
 	 */
 	public function onCrafting(CraftItemEvent $event){
+		/*
 		foreach ($event->getTransaction()->getInventories() as $inv) {
 			if (($inv instanceof PlayerInventory)) continue;
 			$player = $inv->getHolder();
@@ -60,6 +61,7 @@ class EventListener implements Listener{
 				return;
 			}
 		}
+		*/
 	}
 
 	/**

@@ -1,16 +1,4 @@
 <?php
-/**
- **
- ** CONFIG:main
- **
- ** Configure the different features used by this plugin.
- **
- **    feature: true|false
- **
- ** If `true` the feature is enabled.  if `false` the feature is disabled.
- **
- **
- **/
 namespace aliuly\helper;
 
 use pocketmine\plugin\PluginBase;
@@ -50,8 +38,8 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 	protected $monitor;
 
 	public function onEnable(){
-
 		if (!is_dir($this->getDataFolder())) mkdir($this->getDataFolder());
+
 		if (mc::plugin_init($this,$this->getFile()) === false) {
 			file_put_contents($this->getDataFolder()."messages.ini",MPMU::getResourceContents($this,"messages/eng.ini")."\n\"<nagme>\"=\"yes\"\n");
 			mc::plugin_init($this,$this->getFile());
@@ -59,13 +47,31 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 			$this->getLogger()->error(TextFormat::YELLOW."Creating a custom \"messages.ini\" with English strings");
 			$this->getLogger()->error(TextFormat::AQUA."Please consider translating and submitting a translation");
 			$this->getLogger()->error(TextFormat::AQUA."to the developer");
+			$this->getLogger()->error(TextFormat::YELLOW."If you later change your language in \"pocketmine.yml\"");
+			$this->getLogger()->error(TextFormat::YELLOW."make sure you delete this \"messages.ini\"");
+			$this->getLogger()->error(TextFormat::YELLOW."otherwise your changes will not be recognized");
 		} else {
 			if (mc::_("<nagme>") === "yes") {
-				$this->getLogger()->error(TextFormat::RED."Your selected language \"".$this->getServer()->getProperty("settings.language")."\" is not supported");
-				$this->getLogger()->error(TextFormat::AQUA."Please consider translating \"messages.ini\"");
-				$this->getLogger()->error(TextFormat::AQUA."and submitting a translation to the  developer");
+				// Potentially the language may exists since this was created...
+				$ln = $this->getServer()->getProperty("settings.language");
+				$fp = $this->getResource("messages/".$ln.".ini");
+				if($fp === null){
+					$this->getLogger()->error(TextFormat::RED."Your selected language \"".$ln."\" is not supported");
+					$this->getLogger()->error(TextFormat::AQUA."Please consider translating \"messages.ini\"");
+					$this->getLogger()->error(TextFormat::AQUA."and submitting a translation to the  developer");
+				} else {
+					fclose($fp);
+					// This language is actually supported...
+					$this->getLogger()->error(TextFormat::RED."Using a supported language: \"".$ln."\"");
+					$this->getLogger()->error(TextFormat::YELLOW."Saving/Fixing \"messages.ini\" as");
+					$this->getLogger()->error(TextFormat::YELLOW."\"messages.bak\"...");
+					$orig = file_get_contents($this->getDataFolder()."messages.ini");
+					file_put_contents($this->getDataFolder()."messages.bak",strtr($orig,["<nagme>"=>"<don't nagme>"]));
+					unlink($this->getDataFolder()."messages.ini");
+				}
 			}
 		}
+
 		$this->auth = $this->getServer()->getPluginManager()->getPlugin("SimpleAuth");
 		if (!$this->auth) {
 			$this->getLogger()->error(TextFormat::RED.mc::_("Unable to find SimpleAuth"));
@@ -74,6 +80,7 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		}
 
 		$defaults = [
+			//= cfg:main
 			"version" => $this->getDescription()->getVersion(),
 			"# max-attemps" => "kick player after this many login attempts. ",// NOTE: This conflicts with SimpleAuth's blockAfterFail setting
 			"max-attempts" => 5,
@@ -213,9 +220,13 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 				$pl->kick(mc::_("registration error"));
 				return;
 			}
-			if (!$this->auth->authenticatePlayer($pl)) {
-				$pl->kick(mc::_("auth error"));
-				return;
+			try { //##TODO!
+				if (!$this->auth->authenticatePlayer($pl)) {
+					$pl->kick(mc::_("auth error"));
+					return;
+				}
+			} catch (\Exception $e) {
+				$this->getLogger()->warning(mc::_("Ignoring caught exception!"));
 			}
 			unset($this->pwds[$n]);
 			$ev->setMessage("~");
@@ -223,6 +234,7 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 			$pl->sendMessage(TextFormat::GREEN.mc::_("register ok"));
 			return;
 		}
+		/* //##TODO!!!
 		if ($this->cfg["leet-mode"]) {
 			$msg = $ev->getMessage();
 			if (preg_match(self::RE_LOGIN,$msg)) {
@@ -240,8 +252,37 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 				$this->pwds[$n] = 1;
 			}
 			$this->getServer()->getScheduler()->scheduleDelayedTask(new PluginCallbackTask($this,[$this,"checkLoginCount"],[$n]),5);
+		}*/
+		//##TODO!!!
+		$msg = $ev->getMessage();
+		$ev->setMessage("~");
+		$ev->setCancelled();
+		if ($this->cfg["leet-mode"]) {
+			if (preg_match(self::RE_LOGIN,$msg)) {
+				$pl->sendMessage(TextFormat::YELLOW.mc::_("snob login"));
+				$msg = preg_replace(self::RE_LOGIN,"",$msg);
+			}
 		}
-		return;
+		if ($this->authenticate($pl,$msg)) {
+			// OK good password
+			try { //##TODO!
+				if (!$this->auth->authenticatePlayer($pl)) {
+					$pl->kick(mc::_("auth error"));
+					return;
+				}
+			} catch (\Exception $e) {
+				$this->getLogger()->warning(mc::_("Ignoring caught exception!"));
+			}
+			return;
+		}
+		if ($this->cfg["max-attempts"] > 0) {
+			if (isset($this->pwds[$n])) {
+				++$this->pwds[$n];
+			} else {
+				$this->pwds[$n] = 1;
+			}
+			$this->checkLoginCount($n);
+		}
 	}
 	public function checkTimeout($n) {
 		$pl = $this->getServer()->getPlayer($n);
