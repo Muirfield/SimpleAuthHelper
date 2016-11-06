@@ -1,24 +1,44 @@
 <img src="https://raw.githubusercontent.com/alejandroliu/pocketmine-plugins/master/Media/helper.alt-icon.png" style="width:64px;height:64px" width="64" height="64"/>
 
-SimpleAuthHelper
-================
+# SimpleAuthHelper
 
-* Summary: Simplifies the SimpleAuth login process
-* Dependency Plugins: n/a
-* PocketMine-MP version: 1.4 - API 1.10.0
+* Summary: Simplifies the way people authenticate to servers
+* Dependency Plugins: SimpleAuth
+* PocketMine-MP version: 1.5 (API:1.12.0)
 * DependencyPlugins: SimpleAuth
 * OptionalPlugins: -
 * Categories: General
 * Plugin Access: Commands
 * WebSite: [github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/SimpleAuthHelper)
 
-Overview
---------
+## Overview
 
-Very simple plugin that simplifies the login process... Instead of
+<!-- php: $v_forum_thread = "http://forums.pocketmine.net/threads/simpleauthhelper.8074/"; -->
+<!-- template: prologue.md -->
+
+**DO NOT POST QUESTION/BUG-REPORTS/REQUESTS IN THE REVIEWS**
+
+It is difficult to carry a conversation in the reviews.  If you
+have a question/bug-report/request please use the
+[Thread](http://forums.pocketmine.net/threads/simpleauthhelper.8074/) for
+that.  You are more likely to get a response and help that way.
+
+_NOTE:_
+
+This documentation was last updated for version **2.0.1**.
+
+
+You can also download this plugin from this [page](https://github.com/alejandroliu/pocketmine-plugins/releases/tag/SimpleAuthHelper-2.0.1).
+
+<!-- template-end -->
+
+A plugin that simplifies the login process... Instead of
 asking for commands, users simply chat away...
 
-### Register process
+I also provides for a number of tweaks that can improve the usability of
+[SimpleAuth](https://forums.pocketmine.net/plugins/simpleauth.4/).
+
+#### Register process
 
 Player connects for the first time.  They are prompted to enter a
 *NEW* password.  They enter their password directly, without having to
@@ -27,64 +47,133 @@ enter */register*.
 They are asked for the password again to confirm.  They re-enter their
 password (again without */register*).
 
-### Login process
+#### Login process
 
 Player connects again.  They are prompted to enter their login
 password.  They type their login password directly (without
 */login*).  And they are in.
 
-Documentation
--------------
-
-As a bonus, it can start a player with initial inventory upon
-registration.  This is configured through the `nest-egg` setting.
+## Documentation
 
 ### Commands
 
-* *chpwd* _<old-pwd>_  
-  Used by players to change their passwords.
-* *resetpwd* _<player>_  
-  Used by ops to reset a players password.  This actually unregisters
-  the password.
+* *chpwd* _&lt;old-pwd&gt;_
+  * Used by players to change their passwords.
+* *resetpwd* _&lt;player&gt;_
+  * Used by ops to reset a players password.  This actually unregisters
+    the password.
+* *preregister* _&lt;player&gt;_  _&lt;passwd&gt;_
+  * Used by ops to pre-register players.
+* *logout*
+  * De-authenticates a player.
+
+### Permission Nodes
+
+* simpleauthhelper.command.chpwd : Allow users to change passwords
+* simpleauthhelper.command.logout : Allow users to logout
+* simpleauthhelper.command.resetpwd : Allow ops to reset other's passwords
+  (Defaults to Op)
+* simpleauthhelper.command.prereg : Allow ops to pre-register users
+  (Defaults to Op)
+
 
 ### Configuration
 
-	---
-	messages:
-	  re-enter pwd: 'Please re-enter password to confirm:'
-	  passwords dont match: |-
-	    Passwords do not match.
-	    Please try again!
-	    Enter a new password:
-	  register ok: You have been registered!
-	  no spaces: |-
-	    Password should not contain spaces
-	    or tabs
-	  not name: Password should not be your name
-	  too many login: You have attempted to login too many times.
-	  login timeout: Login timer expired!
-	nest-egg:
-	- "272:0:1"
-	- "17:0:16"
-	- "364:0:5"
-	- "266:0:10"
-	max-attempts: 5
-	login-timeout: 60
-	auto-ban: false
-	...
+Configuration is through the `config.yml` file.
+The following sections are defined:
 
-* The section `messages` can be used to configure displayed texts.
-* `nest-egg` section contains list of items that will be given to the
-  player upon registration.
-* `max-attempts` counts the number of tries to login.
-* `login-timeout` will kick the player out if not authenticated in
-  that number of seconds.
-* `auto-ban`: If set to true it will automatically ban the IP of a
-  player that does too many login attempts.
+#### main
 
-Changes
--------
 
+Configure the different features used by this plugin.
+
+   feature: true|false
+
+If `true` the feature is enabled.  if `false` the feature is disabled.
+*  max-attemps: kick player after this many login attempts.  NOTE: This conflicts with SimpleAuth's blockAfterFail setting
+*  login-timeout: must authenticate within this number of seconds
+*  leet-mode: lets players use also /login and /register
+*  chat-protect: prevent player to display their password in chat
+*  hide-unauth: EXPERIMENTAL, hide unauthenticated players
+*  event-fixer: EXPERIMENTAL, cancels additional events for unauthenticated players
+*  hack-login-perms: EXPERIMENTAL, overrides login permisions to make sure players can login
+*  hack-register-perms: EXPERIMENTAL, overrides register permisions to make sure players can register
+*  db-monitor: EXPERIMENTAL, enable database server monitoring
+*  monitor-settings: Configure database monitor settings
+
+#### monitor-settings
+
+*  canary-account: account to query this account is tested to check database proper operations
+*  check-interval: how to often to check database (seconds)
+
+
+## Translations
+
+This plugin will honour the server language configuration.  The
+languages currently available are:
+
+* English
+* Spanish
+
+You can provide your own message file by creating a file called
+`messages.ini` in the plugin config directory.  Check
+[github](https://github.com/alejandroliu/pocketmine-plugins/tree/master/SimpleAuthHelper/resources/messages)
+for sample files.
+
+## Player pre-registration
+
+It is possible to implement a web based pre-registration system with this
+plugin.
+
+1. *rcon* must be enabled on the PocketMine server.
+2. web server must be able to send *rcon* commands to PocketMine.
+3. Enable the *whitelist* functionality in PocketMine.
+4. Install *SimpleAuth* and *SimpleAuthHelper*.
+5. **Optionally** install *PurePerms* and disable
+   `simpleauthhelper.command.chpwd` permission.  You probably want
+   users to change passwords from the web site.
+6. Whenever a user registers in web site, the web site script uses *rcon*
+   to send the follwoing:
+   - whitelist add _player_
+   - preregister _player_ _passwd_
+7. Whenever a user changes password in web site, we use *rcon* with:
+   - resetpwd _player_
+   - preregister _player_ _passwd_
+
+## Database Monitor
+
+This module is responsible for monitoring the SimpleAuth data provider
+to make sure that it is up and running and disable logins if it is not
+available.
+
+It kicks off a background task that will poll the SimpleAuth data provider
+by trying to retrieve the data from the "canary-account".  It is important
+that you have configured and have working SimpleAuth provider the first
+time you enable the database monitor.  This is because the "canary-account"
+needs to be created (if it doesn't exist already).
+
+On a regular interval, the SimpleAuth
+data provider is checked.  If it is not running, all unauthenticated players
+are kicked and any new joins are not allowed.
+
+## Issues
+
+* Event Fixer: Crafting canceling doesn't work
+
+# Changes
+
+* 2.0.1: language defaults
+  - make sure that languages default to English (reported by @minebuilder0110)
+* 2.0.0: Major upgrade
+  - uses now a common translation library
+  - Removed little used feature: nest-egg
+  - leet-mode also works for /register.
+  - Removed auto-ban.  It is now done in SimpleAuth.
+  - Added support for hiding unauthenticated players (Suggested by @CaptainKenji17)
+  - Added pre-register and logout command
+  - forces permissions to be set
+  - Added a task to monitor database server status
+  - Thanks @rvachvg for helping debug this.
 * 1.2.3: Security improvements
   - prevent user from chatting away their password
   - add option so that players can also use "/login" to login.
@@ -93,7 +182,7 @@ Changes
 * 1.2.1: CallbackTask deprecation
   * Removed CallbackTask deprecation warnings
 * 1.2.0: max-logins
-  * Suggestion from MCPEPIG
+  * Suggestion from @MCPEPIG
     - kick user out after `max-attempts`.
     - Added a chpwd command.
   * Kick user out if not authenticated after `timeout` seconds.
@@ -103,8 +192,7 @@ Changes
   * Messages can be configured.
 * 1.0.0: First release
 
-Copyright
----------
+# Copyright
 
     SimpleAuthHelper
     Copyright (C) 2015 Alejandro Liu  
@@ -122,3 +210,4 @@ Copyright
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
+

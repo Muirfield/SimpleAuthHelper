@@ -1,4 +1,16 @@
 <?php
+/**
+ **
+ ** CONFIG:main
+ **
+ ** Configure the different features used by this plugin.
+ **
+ **    feature: true|false
+ **
+ ** If `true` the feature is enabled.  if `false` the feature is disabled.
+ **
+ **
+ **/
 namespace aliuly\helper;
 
 use pocketmine\plugin\PluginBase;
@@ -15,57 +27,88 @@ use pocketmine\item\Item;
 use pocketmine\utils\Config;
 use pocketmine\Player;
 
+use SimpleAuth\event\PlayerAuthenticateEvent;
+
+use aliuly\helper\common\PluginCallbackTask;
+use aliuly\helper\common\mc;
+use aliuly\helper\common\MPMU;
+
+use aliuly\helper\EventListener;
+use aliuly\helper\PermsHacker;
+use aliuly\helper\DbMonitorTask;
+
 class Main extends PluginBase implements Listener,CommandExecutor {
-	protected $auth;
+	const RE_REGISTER = '/^\s*\/register\s+/';
+	const RE_LOGIN = '/^\s*\/login\s+/';
+
+	public $auth;
 	protected $pwds;
 	protected $chpwd;
 	protected $cfg;
+	protected $listener;
+	protected $permshacker;
+	protected $monitor;
 
 	public function onEnable(){
+
+		if (!is_dir($this->getDataFolder())) mkdir($this->getDataFolder());
+		if (mc::plugin_init($this,$this->getFile()) === false) {
+			file_put_contents($this->getDataFolder()."messages.ini",MPMU::getResourceContents($this,"messages/eng.ini")."\n\"<nagme>\"=\"yes\"\n");
+			mc::plugin_init($this,$this->getFile());
+			$this->getLogger()->error(TextFormat::RED."Your selected language \"".$this->getServer()->getProperty("settings.language")."\" is not supported");
+			$this->getLogger()->error(TextFormat::YELLOW."Creating a custom \"messages.ini\" with English strings");
+			$this->getLogger()->error(TextFormat::AQUA."Please consider translating and submitting a translation");
+			$this->getLogger()->error(TextFormat::AQUA."to the developer");
+		} else {
+			if (mc::_("<nagme>") === "yes") {
+				$this->getLogger()->error(TextFormat::RED."Your selected language \"".$this->getServer()->getProperty("settings.language")."\" is not supported");
+				$this->getLogger()->error(TextFormat::AQUA."Please consider translating \"messages.ini\"");
+				$this->getLogger()->error(TextFormat::AQUA."and submitting a translation to the  developer");
+			}
+		}
 		$this->auth = $this->getServer()->getPluginManager()->getPlugin("SimpleAuth");
 		if (!$this->auth) {
-			$this->getLogger()->info(TextFormat::RED."Unable to find SimpleAuth");
+			$this->getLogger()->error(TextFormat::RED.mc::_("Unable to find SimpleAuth"));
+			throw new \RuntimeException("Missing Dependancy");
 			return;
 		}
-		if (!is_dir($this->getDataFolder())) mkdir($this->getDataFolder());
+
 		$defaults = [
 			"version" => $this->getDescription()->getVersion(),
-			"messages" => [
-				"re-enter pwd" => "Please re-enter password to confirm:",
-				"passwords dont match" => "Passwords do not match.\nPlease try again!\nEnter a new password:",
-				"register ok" => "You have been registered!",
-				"no spaces" => "Password should not contain spaces or tabs",
-				"not name" => "Password should not be your name",
-				"too many logins" => "You have attempted to login too many times.",
-				"login timeout" => "Login timer expired!",
-				"register first" => "You must first be registered",
-				"chpwd msg" => "Enter your new password:",
-				"chpwd error" => "Old password does not match",
-				"chpwd ok" => "Password changed succesfully",
-				"registration error" => "Registration error.  Try again later!",
-				"auth error" => "Authentication error.  Try again later!",
-				"chat protected" => "Do not send your password on the chat window",
-				"snob login" => "Actually, you don't really need to type /login",
-			],
-			"nest-egg" => [
-				"STONE_SWORD:0:1",
-				"WOOD:0:16",
-				"COOKED_BEEF:0:5",
-				"GOLD_INGOT:0:10",
-			],
+			"# max-attemps" => "kick player after this many login attempts. ",// NOTE: This conflicts with SimpleAuth's blockAfterFail setting
 			"max-attempts" => 5,
+			"# login-timeout" => "must authenticate within this number of seconds",
 			"login-timeout" => 60,
-			"auto-ban" => false,
-			"lamer-mode" => false,
+			"# leet-mode" => "lets players use also /login and /register",
+			"leet-mode" => true,
+			"# chat-protect" => "prevent player to display their password in chat",
 			"chat-protect" => false,
+			"# hide-unauth" => "EXPERIMENTAL, hide unauthenticated players",
+			"hide-unauth" => false,
+			"# event-fixer" => "EXPERIMENTAL, cancels additional events",// for unauthenticated players
+			"event-fixer" => false,
+			"# hack-login-perms" => "EXPERIMENTAL, overrides login permisions",//to make sure players can login
+			"hack-login-perms" => false,
+			"# hack-register-perms" => "EXPERIMENTAL, overrides register permisions",//to make sure players can register
+			"hack-register-perms" => false,
+			"# db-monitor" => "EXPERIMENTAL, enable database server monitoring",
+			"db-monitor" => false,
+			"# monitor-settings" => "Configure database monitor settings",
+			"monitor-settings" => DbMonitorTask::defaults(),
 		];
-		if (file_exists($this->getDataFolder()."config.yml")) {
-			unset($defaults["nest-egg"]);
-		}
 		$this->cfg=(new Config($this->getDataFolder()."config.yml",
 										  Config::YAML,$defaults))->getAll();
 
-		$this->getServer()->getPluginManager()->registerEvents($this, $this);
+		$this->getServer()->getPluginManager()->registerEvents($this,$this);
+		if ($this->cfg["event-fixer"]) {
+			$this->listener =new EventListener($this);
+		}
+		if ($this->cfg["hack-login-perms"] || $this->cfg["hack-register-perms"]) {
+			$this->permshacker = new PermsHacker($this,$this->cfg["hack-login-perms"],$this->cfg["hack-register-perms"]);
+		}
+		if ($this->cfg["db-monitor"]) {
+			$this->monitor = new DbMonitorTask($this,$this->cfg["monitor-settings"]);
+		}
 		$this->pwds = [];
 	}
 	//////////////////////////////////////////////////////////////////////
@@ -79,9 +122,30 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		if (isset($this->chpwd[$n])) unset($this->chpwd[$n]);
 	}
 	public function onPlayerJoin(PlayerJoinEvent $ev) {
-		if ($this->cfg["login-timeout"] == 0) return;
-		$n = $ev->getPlayer()->getName();
-		$this->getServer()->getScheduler()->scheduleDelayedTask(new PluginCallbackTask($this,[$this,"checkTimeout"],[$n]),$this->cfg["login-timeout"]*20);
+		if ($this->cfg["login-timeout"] !== 0) {
+			$n = $ev->getPlayer()->getName();
+			$this->getServer()->getScheduler()->scheduleDelayedTask(new PluginCallbackTask($this,[$this,"checkTimeout"],[$n]),$this->cfg["login-timeout"]*20);
+		}
+		if ($this->cfg["hide-unauth"]) {
+			$p = $ev->getPlayer();
+			foreach($this->getServer()->getOnlinePlayers() as $online){
+				$online->hidePlayer($p);
+				$p->hidePlayer($online);
+			}
+			$ev->setJoinMessage("");
+			//
+		}
+	}
+	public function onAuthenticate(PlayerAuthenticateEvent $ev) {
+		if (!$this->cfg["hide-unauth"]) return;
+		$pl = $ev->getPlayer();
+		$this->getServer()->broadcastMessage(TextFormat::YELLOW.mc::_("%1% has just joined", $pl->getDisplayName()));
+		foreach($this->getServer()->getOnlinePlayers() as $online){
+			$online->showPlayer($pl);
+			if ($this->auth->isPlayerAuthenticated($online)) {
+				$pl->showPlayer($online);
+			}
+		}
 	}
 	/**
 	 * @priority LOW
@@ -93,8 +157,8 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		if ($this->auth->isPlayerAuthenticated($pl) && !isset($this->chpwd[$n])) {
 			if ($this->cfg["chat-protect"]) {
 				if ($this->authenticate($pl,$ev->getMessage())) {
-					$pl->sendMessage($this->cfg["messages"]["chat protected"]);
-					$ev->setMessage("**CENSORED**");
+					$pl->sendMessage(TextFormat::RED.mc::_("chat protected"));
+					$ev->setMessage(mc::_("**CENSORED**"));
 					$ev->setCancelled();
 				}
 			}
@@ -103,13 +167,17 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 
 		if (!$this->auth->isPlayerRegistered($pl) || isset($this->chpwd[$n])) {
 			if (!isset($this->pwds[$n])) {
+				if ($this->cfg["leet-mode"] && preg_match(self::RE_REGISTER,$ev->getMessage())) {
+					$pl->sendMessage(TextFormat::YELLOW.mc::_("snob register"));
+					$ev->setMessage(preg_replace(self::RE_REGISTER,'',$ev->getMessage()));
+				}
 				if (!$this->checkPwd($pl,$ev->getMessage())) {
 					$ev->setCancelled();
 					$ev->setMessage("~");
 					return;
 				}
 				$this->pwds[$n] = $ev->getMessage();
-				$pl->sendMessage($this->cfg["messages"]["re-enter pwd"]);
+				$pl->sendMessage(TextFormat::AQUA.mc::_("re-enter pwd"));
 				$ev->setCancelled();
 				$ev->setMessage("~");
 				return;
@@ -118,7 +186,7 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 				unset($this->pwds[$n]);
 				$ev->setCancelled();
 				$ev->setMessage("~");
-				$pl->sendMessage($this->cfg["messages"]["passwords dont match"]);
+				$pl->sendMessage(TextFormat::RED.mc::_("passwords dont match"));
 				return;
 			}
 			if (isset($this->chpwd[$n])) {
@@ -130,45 +198,35 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 				unset($this->pwds[$n]);
 
 				if (!$this->auth->unregisterPlayer($pl)) {
-					$pl->sendMessage($this->cfg["messages"]["registration error"]);
+					$pl->sendMessage(TextFormat::RED.mc::_("registration error"));
 					return;
 				}
 				if (!$this->auth->registerPlayer($pl,$pw)) {
-					$pl->kick($this->cfg["messages"]["registration error"]);
+					$pl->kick(mc::_("registration error"));
 					return;
 				}
-				$pl->sendMessage($this->cfg["messages"]["chpwd ok"]);
+				$pl->sendMessage(TextFormat::GREEN.mc::_("chpwd ok"));
 				return;
 			}
 			// New user registration...
 			if (!$this->auth->registerPlayer($pl,$this->pwds[$n])) {
-				$pl->kick($this->cfg["messages"]["registration error"]);
+				$pl->kick(mc::_("registration error"));
 				return;
 			}
 			if (!$this->auth->authenticatePlayer($pl)) {
-				$pl->kick($this->cfg["messages"]["auth error"]);
+				$pl->kick(mc::_("auth error"));
 				return;
 			}
 			unset($this->pwds[$n]);
 			$ev->setMessage("~");
 			$ev->setCancelled();
-			$pl->sendMessage($this->cfg["messages"]["register ok"]);
-			if (isset($this->cfg["nest-egg"]) && !$pl->isCreative()) {
-				// Award a nest egg to player...
-				foreach ($this->cfg["nest-egg"] as $i) {
-					$r = explode(":",$i);
-					if (count($r) != 3) continue;
-					$item = Item::fromString($r[0].":".$r[1]);
-					$item->setCount(intval($r[2]));
-					$pl->getInventory()->addItem($item);
-				}
-			}
+			$pl->sendMessage(TextFormat::GREEN.mc::_("register ok"));
 			return;
 		}
-		if ($this->cfg["lamer-mode"]) {
+		if ($this->cfg["leet-mode"]) {
 			$msg = $ev->getMessage();
-			if (preg_match('/^\s*\/login\s+/',$msg)) {
-				$pl->sendMessage($this->cfg["messages"]["snob login"]);
+			if (preg_match(self::RE_LOGIN,$msg)) {
+				$pl->sendMessage(TextFormat::YELLOW.mc::_("snob login"));
 			} else {
 				$ev->setMessage("/login $msg");
 			}
@@ -188,7 +246,7 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 	public function checkTimeout($n) {
 		$pl = $this->getServer()->getPlayer($n);
 		if ($pl && !$this->auth->isPlayerAuthenticated($pl)) {
-			$pl->kick($this->cfg["messages"]["login timeout"]);
+			$pl->kick(mc::_("login timeout"));
 		}
 	}
 	public function checkLoginCount($n) {
@@ -196,15 +254,7 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		$pl = $this->getServer()->getPlayer($n);
 		if ($pl && !$this->auth->isPlayerAuthenticated($pl)) {
 			if ($this->pwds[$n] >= $this->cfg["max-attempts"]) {
-				if ($this->cfg["auto-ban"]) {
-					// OK banning use for trying to hack...
-					$ip = $pl->getAddress();
-					$this->getServer()->getIPBans()->addBan($ip,"Too many login attempts",null,"SimpleAuthHelper");
-					$this->getServer()->blockAddress($ip,-1);
-					$this->getServer()->broadcastMessage("[Helper] Banned IP Address $ip");
-				}
-
-				$pl->kick($this->cfg["messages"]["too many logins"]);
+				$pl->kick(mc::_("too many logins"));
 				unset($this->pwds[$n]);
 			}
 			return;
@@ -212,18 +262,19 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 		unset($this->pwds[$n]);
 		return;
 	}
-	public function checkPwd($pl,$pwd) {
+	public function checkPwd($pl,$pwd, $name = null) {
 		if (preg_match('/\s/',$pwd)) {
-			$pl->sendMessage($this->cfg["messages"]["no spaces"]);
+			$pl->sendMessage(TextFormat::RED.mc::_("no spaces"));
 			return false;
 		}
 		if (strlen($pwd) < $this->auth->getConfig()->get("minPasswordLength")){
-			$pl->sendMessage($this->auth->getMessage("register.error.password"));
+			$pl->sendMessage(TextFormat::RED.mc::_("register.error.password %1%",
+										  $this->auth->getConfig()->get("minPasswordLength")));
 			return false;
 		}
-		if (strtolower($pl->getName()) == strtolower($pwd)) {
-			$pl->sendMessage($this->cfg["messages"]["not name"]);
-			return false;
+		if (strtolower($name === null ? $pl->getName() : $name) == strtolower($pwd)) {
+		  $pl->sendMessage(TextFormat::RED.mc::_("not name"));
+		  return false;
 		}
 		return true;
 	}
@@ -240,47 +291,85 @@ class Main extends PluginBase implements Listener,CommandExecutor {
 	// Commands
 	//
 	//////////////////////////////////////////////////////////////////////
+	private function chpwd(CommandSender $sender, $oldpwd) {
+		if (!($sender instanceof Player)) {
+			$sender->sendMessage(TextFormat::RED.
+										mc::_("This command only works in-game."));
+			return true;
+		}
+		if(!$this->auth->isPlayerRegistered($sender)) {
+			$sender->sendMessage(TextFormat::YELLOW.mc::_("register first"));
+			return true;
+		}
+		if ($this->authenticate($sender,$oldpwd)) {
+			$this->chpwd[$sender->getName()] = $sender->getName();
+			$sender->sendMessage(TextFormat::AQUA.mc::_("chpwd msg"));
+			return true;
+		}
+		$sender->sendMessage(TextFormat::RED.mc::_("chpwd error"));
+		return false;
+	}
+	private function resetpwd($sender, $name) {
+		$player = $this->getServer()->getOfflinePlayer($name);
+		if($this->auth->unregisterPlayer($player)){
+			$sender->sendMessage(TextFormat::GREEN . mc::_("%1% unregistered",$name));
+			if($player instanceof Player){
+				$player->sendMessage(TextFormat::YELLOW.mc::_("You are no longer registered!"));
+				$this->auth->deauthenticatePlayer($player);
+			}
+		}else{
+			$sender->sendMessage(TextFormat::RED . mc::_("Unable to unregister %1%",$name));
+		}
+		return true;
+	}
+	private function logout($sender) {
+		if (!($sender instanceof Player)) {
+			$sender->sendMessage(TextFormat::RED.
+										mc::_("This command only works in-game."));
+			return true;
+		}
+		if(!$this->auth->isPlayerAuthenticated($sender)) {
+			$sender->sendMessage(TextFormat::YELLOW.mc::_("login first"));
+			return true;
+		}
+		$sender->sendMessage(TextFormat::GREEN.mc::_("logout completed"));
+		$this->auth->deauthenticatePlayer($sender);
+		return true;
+	}
+	private function prereg($sender,$name,$newpwd) {
+		$player = $this->getServer()->getOfflinePlayer($name);
+		if ($this->auth->isPlayerRegistered($player)) {
+			$sender->sendMessage(TextFormat::RED.mc::_("%1% already registered", $name));
+			return true;
+		}
+		if (!$this->checkPwd($sender,$newpwd,$name)) return true;
+		if ($this->auth->registerPlayer($player,$newpwd)) {
+			$sender->sendMessage(TextFormat::GREEN.mc::_("registered %1%", $name));
+			$sender->sendMessage("OK");
+		} else {
+			$sender->sendMessage(TextFormat::RED.mc::_("error registering %1%", $name));
+		}
+		return true;
+	}
 	public function onCommand(CommandSender $sender, Command $cmd, $label, array $args) {
 		if (!$this->auth) {
-			$sender->sendMessage(TextFormat::RED."SimpleAuthHelper has been disabled");
-			$sender->sendMessage(TextFormat::RED."SimpleAuth not found!");
+			$sender->sendMessage(TextFormat::RED.mc::_("SimpleAuthHelper has been disabled"));
+			$sender->sendMessage(TextFormat::RED.mc::_("SimpleAuth not found!"));
 			return true;
 		}
 		switch($cmd->getName()){
 			case "chpwd":
-				if (!($sender instanceof Player)) {
-					$sender->sendMessage(TextFormat::RED.
-												"This command only works in-game.");
-					return true;
-				}
 				if (count($args) == 0) return false;
-				if(!$this->auth->isPlayerRegistered($sender)) {
-					$sender->sendMessage($this->cfg["messages"]["register first"]);
-					return true;
-				}
-				if ($this->authenticate($sender,implode(" ", $args))) {
-					$this->chpwd[$sender->getName()] = $sender->getName();
-					$sender->sendMessage($this->cfg["messages"]["chpwd msg"]);
-					return true;
-				}
-				$sender->sendMessage($this->cfg["messages"]["chpwd error"]);
-				return false;
-				break;
+				return $this->chpwd($sender, implode(" ", $args));
 			case "resetpwd":
-				foreach($args as $name){
-					$player = $this->getServer()->getOfflinePlayer($name);
-					if($this->auth->unregisterPlayer($player)){
-						$sender->sendMessage(TextFormat::GREEN . "$name unregistered");
-						if($player instanceof Player){
-							$player->sendMessage(TextFormat::YELLOW."You are no longer registered!");
-							$this->auth->deauthenticatePlayer($player);
-						}
-					}else{
-						$sender->sendMessage(TextFormat::RED . "Unable to unregister $name");
-					}
-					return true;
-				}
-				break;
+				if (count($args) != 1) return false;
+				return $this->resetpwd($sender, $args[0]);
+			case "logout":
+				if (count($args) != 0) return false;
+				return $this->logout($sender);
+			case "preregister":
+				if (count($args) != 2) return false;
+				return $this->prereg($sender,$args[0],$args[1]);
 		}
 		return false;
 	}
